@@ -1,15 +1,25 @@
+import { env } from "./config/env";
 import express from "express";
+import cors from "cors";
 import { testConnection } from "./db/db";
+import { errorHandler, notFoundHandler } from "./middlewares/error_handler";
+import { authRouter } from "./routers/auth_router";
 
 const app = express();
-const PORT = process.env.PORT || 3333;
 
+app.set("trust proxy", env.trustProxy);
+app.use(cors({ origin: env.corsOrigins.includes("*") ? true : env.corsOrigins }));
 app.use(express.json());
+
+app.use("/auth", authRouter);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
 
 testConnection()
   .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
+    app.listen(env.port, () => {
+      console.log(`Server running on port ${env.port}`);
     });
   })
   .catch((error) => {

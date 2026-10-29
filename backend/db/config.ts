@@ -1,9 +1,7 @@
-import dotenv from "dotenv";
+import "../config/load_env";
 import fs from "node:fs";
 import path from "node:path";
 import type { ConnectionOptions } from "mysql2/promise";
-
-dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 function sslOptions(): ConnectionOptions["ssl"] {
   if (process.env.DB_SSL !== "true") return undefined;
