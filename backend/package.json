@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "tsx watch server.ts",
     "build": "tsc",
-    "start": "node dist/server.js"
+    "start": "node dist/server.js",
+    "migrate": "tsx db/migrate.ts",
+    "migrate:create": "tsx db/migrate.ts create"
   },
   "keywords": [],
   "author": "",
@@ -14,7 +16,8 @@
   "type": "commonjs",
   "dependencies": {
     "dotenv": "^18.0.9",
-    "express": "^5.3.0"
+    "express": "^5.3.0",
+    "mysql2": "^3.24.6"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
