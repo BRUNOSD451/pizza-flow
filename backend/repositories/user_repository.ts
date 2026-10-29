@@ -7,6 +7,7 @@ export interface Usuario {
   nome: string;
   email: string;
   admin_plataforma: boolean;
+  deve_trocar_senha: boolean;
   criado_em: Date;
   atualizado_em: Date;
 }
@@ -21,15 +22,20 @@ export interface CriarUsuarioDados {
   email: string;
   senhaHash: string;
   adminPlataforma?: boolean;
+  deveTrocarSenha?: boolean;
 }
 
 export type EditarUsuarioDados = Partial<CriarUsuarioDados>;
 
-const COLUNAS_PUBLICAS = "id, nome, email, admin_plataforma, criado_em, atualizado_em";
+const COLUNAS_PUBLICAS = "id, nome, email, admin_plataforma, deve_trocar_senha, criado_em, atualizado_em";
 
 // mysql2 devolve BOOLEAN (TINYINT) como 0/1
 function toUsuario<T extends Usuario>(row: RowDataPacket): T {
-  return { ...row, admin_plataforma: Boolean(row.admin_plataforma) } as T;
+  return {
+    ...row,
+    admin_plataforma: Boolean(row.admin_plataforma),
+    deve_trocar_senha: Boolean(row.deve_trocar_senha),
+  } as T;
 }
 
 class userrepository {
@@ -37,8 +43,9 @@ class userrepository {
   async create(dados: CriarUsuarioDados, conn: Executor = db): Promise<Usuario> {
     const id = randomUUID();
     await conn.execute(
-      "INSERT INTO usuarios (id, nome, email, senha_hash, admin_plataforma) VALUES (?, ?, ?, ?, ?)",
-      [id, dados.nome, dados.email.trim(), dados.senhaHash, dados.adminPlataforma ?? false]
+      `INSERT INTO usuarios (id, nome, email, senha_hash, admin_plataforma, deve_trocar_senha)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, dados.nome, dados.email.trim(), dados.senhaHash, dados.adminPlataforma ?? false, dados.deveTrocarSenha ?? false]
     );
 
     const usuario = await this.findById(id, conn);
@@ -81,6 +88,10 @@ class userrepository {
     if (dados.adminPlataforma !== undefined) {
       campos.push("admin_plataforma = ?");
       valores.push(dados.adminPlataforma);
+    }
+    if (dados.deveTrocarSenha !== undefined) {
+      campos.push("deve_trocar_senha = ?");
+      valores.push(dados.deveTrocarSenha);
     }
 
     if (campos.length > 0) {

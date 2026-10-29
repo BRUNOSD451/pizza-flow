@@ -22,8 +22,8 @@ Papéis ficam em `membros.papel`. **Cada usuário pertence a uma única pizzaria
 
 | Papel | Permissões principais |
 |---|---|
-| `dono` | Tudo dentro da sua pizzaria, inclusive equipe, configurações da loja e dados financeiros |
-| `gerente` | Operação completa: cardápio, pedidos, cancelamentos, equipe (exceto mexer em `dono`), relatórios |
+| `dono` | Tudo dentro da sua pizzaria, inclusive configurações da loja e dados financeiros. **Único que cadastra e altera membros** |
+| `gerente` | Operação completa: cardápio, pedidos, cancelamentos, relatórios. Na equipe, só consulta |
 | `atendente` | Cria e acompanha pedidos de balcão/WhatsApp, aceita pedidos do site, cadastra clientes, registra pagamentos |
 | `garcom` | Mesas, comandas e pedidos do salão; só vê as próprias comandas abertas e as da sua pizzaria |
 | `cozinha` | Só lê pedidos e altera status de preparo (`preparando`, `pronto`); não vê valores financeiros |
@@ -31,6 +31,12 @@ Papéis ficam em `membros.papel`. **Cada usuário pertence a uma única pizzaria
 
 **Admin supremo** (dono da plataforma): acesso global a todos os tenants, fora do sistema de `membros`.
 É a coluna `usuarios.admin_plataforma` (migration 005). Só é ligada pelo script `npm run seed:admin`; **nenhuma rota da API pode alterar essa flag**. A checagem é sempre no backend.
+
+Equipe (`/membros`):
+- O dono cadastra o membro (nome, email, papel) e o sistema gera uma **senha provisória aleatória**, devolvida só nessa resposta (no banco fica o hash). Ninguém cria outro `dono`.
+- Com `usuarios.deve_trocar_senha = TRUE` (migration 006), `autenticar` bloqueia tudo com 403 `TROCA_SENHA_OBRIGATORIA`; só `GET /auth/me` e `POST /auth/trocar-senha` usam `autenticarPermitindoSenhaProvisoria`.
+- Esqueceu a senha: o dono usa `POST /membros/:id/resetar-senha` (nova senha provisória). O dono não altera a si mesmo nem outro dono por essas rotas.
+- Desligar = `ativo = false` (nunca apagar, para manter o histórico dos pedidos).
 
 Regras de autorização:
 - Toda rota autenticada resolve `usuario_id` → seu único `membros` ativo → `pizzaria_id` e papel. Usuário sem membro ativo não acessa nenhuma pizzaria.
@@ -41,7 +47,7 @@ Regras de autorização:
 
 - **Backend**: Node + TypeScript + Express 5 + `mysql2/promise` (SQL puro, sem ORM). Roda com `tsx`.
 - **Banco**: MySQL 8.4 hospedado na **Aiven** (SSL obrigatório).
-- **Frontend**: Expo (SDK 58) / React Native, com saída mobile e web. Leia [frontend/AGENTS.md](frontend/AGENTS.md) antes de mexer no front; ele obriga consultar a doc versionada do Expo.
+- **Frontend**: Expo (SDK 58) / React Native, com saída mobile e web. Leia [frontendApp/AGENTS.md](frontendApp/AGENTS.md) antes de mexer no front; ele obriga consultar a doc versionada do Expo.
 
 ## Estrutura
 
@@ -60,7 +66,7 @@ backend/
   db/migrate.ts           # runner de migrations
   db/migrations/NNN_*.sql
   routers/ → controllers/ → services/ → repositories/
-frontend/                 # app Expo
+frontendApp/              # app Expo
 ```
 
 Camadas do backend:
@@ -70,6 +76,7 @@ Camadas do backend:
 - **repositories**: único lugar com SQL. Sempre queries parametrizadas (`?`), nunca concatenar valores. Todo método aceita `conn: Executor = db` por último, para participar de transações.
 
 Padrões:
+- **JSON da API em snake_case**, tanto no body das requisições quanto nas respostas (`fuso_horario`, `deve_trocar_senha`, `senha_temporaria`), igual às colunas do banco. Variáveis, funções e tipos internos do TypeScript continuam em camelCase (`req.auth.pizzariaId`); a conversão acontece no controller/service, na borda da API.
 - **Rotas protegidas**: `autenticar` → `exigirPapel("dono", "gerente")` ou `exigirAdminPlataforma`. O `pizzariaId` vem de `req.auth`, nunca do body.
 - **Transações**: `withTransaction(async (conn) => { ... })` de `db/db.ts`; passe `conn` a todos os repositories envolvidos. Faça trabalho lento (bcrypt, chamadas externas) antes de abrir a transação.
 - **Erros**: `throw new AppError(mensagem, status, CODIGO)` no service; o `error_handler` formata. `ER_DUP_ENTRY` vira 409 com mensagem amigável no service.
@@ -89,7 +96,7 @@ npx tsc --noEmit                 # typecheck
 ## Banco de dados
 
 ### Regras obrigatórias
-- **Nunca edite uma migration já aplicada** (001–005 já rodaram na Aiven). Toda mudança de schema é uma nova migration.
+- **Nunca edite uma migration já aplicada** (001–006 já rodaram na Aiven). Toda mudança de schema é uma nova migration.
 - Toda tabela precisa de `PRIMARY KEY` (a Aiven exige `sql_require_primary_key`).
 - IDs são `CHAR(36)` com `DEFAULT (UUID())`.
 - Datas em **UTC** (`timezone: "Z"` e `SET time_zone = '+00:00'` na conexão). Converta para `pizzarias.fuso_horario` só na exibição e em regras de horário.

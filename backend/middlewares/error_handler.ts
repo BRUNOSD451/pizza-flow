@@ -38,6 +38,12 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
     return;
   }
 
+  // Body acima do limite do express.json() (100kb)
+  if (error?.type === "entity.too.large") {
+    res.status(413).json({ erro: { mensagem: "Corpo da requisição grande demais" } });
+    return;
+  }
+
   console.error(`[${req.method} ${req.path}]`, error);
   res.status(500).json({ erro: { mensagem: "Erro interno do servidor" } });
 };

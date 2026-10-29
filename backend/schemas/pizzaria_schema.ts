@@ -27,7 +27,7 @@ export const criarPizzariaComDonoSchema = z.object({
       .transform((t) => t.replace(/\D/g, ""))
       .refine((t) => t.length === 10 || t.length === 11, "Telefone deve ter DDD + número (10 ou 11 dígitos)")
       .optional(),
-    fusoHorario: z.string().refine(fusoValido, "Fuso horário inválido (ex.: America/Sao_Paulo)").optional(),
+    fuso_horario: z.string().refine(fusoValido, "Fuso horário inválido (ex.: America/Sao_Paulo)").optional(),
   }),
   dono: z.object({
     nome: z.string("Informe o nome do dono").trim().min(2, "Nome muito curto").max(150),

@@ -4,16 +4,19 @@ import { userRepository, type Usuario } from "../repositories/user_repository";
 import { memberRepository, type Papel } from "../repositories/member_repository";
 import { pizzariaService, type CriarPizzariaComDonoDados } from "./pizzaria_service";
 import { gerarToken } from "../utils/jwt";
+import { compararSenha, hashSenha } from "../utils/senha";
 
-// Quem está logado e onde: admin da plataforma não tem pizzaria, papel nem membro
+// Quem está logado e onde: admin da plataforma não tem pizzaria, papel nem membro.
+// Campos em snake_case porque a sessão sai direto no JSON do login e do /auth/me.
 export interface Sessao {
-  usuario: { id: string; nome: string; email: string; adminPlataforma: boolean };
+  // deve_trocar_senha = true: senha provisória; o app deve levar para a tela de troca
+  usuario: { id: string; nome: string; email: string; admin_plataforma: boolean; deve_trocar_senha: boolean };
   pizzaria: { id: string; nome: string; slug: string } | null;
   papel: Papel | null;
-  membroId: string | null;
+  membro_id: string | null;
 }
 
-export interface LoginResultado extends Omit<Sessao, "membroId"> {
+export interface LoginResultado extends Omit<Sessao, "membro_id"> {
   token: string;
 }
 
@@ -24,18 +27,18 @@ const HASH_FALSO = bcrypt.hashSync("senha-que-nunca-vai-bater", 10);
 class authservice {
   async login(email: string, senha: string): Promise<LoginResultado> {
     const usuario = await userRepository.findByEmail(email);
-    const senhaConfere = await bcrypt.compare(senha, usuario?.senha_hash ?? HASH_FALSO);
+    const senhaConfere = await compararSenha(senha, usuario?.senha_hash ?? HASH_FALSO);
 
     if (!usuario || !senhaConfere) {
       throw new AppError("Email ou senha inválidos", 401, "CREDENCIAIS_INVALIDAS");
     }
 
-    const { membroId: _, ...sessao } = await this.montarSessao(usuario);
+    const { membro_id: _, ...sessao } = await this.montarSessao(usuario);
     const token = gerarToken({
       sub: usuario.id,
       pizzariaId: sessao.pizzaria?.id ?? null,
       papel: sessao.papel,
-      admin: sessao.usuario.adminPlataforma,
+      admin: sessao.usuario.admin_plataforma,
     });
 
     return { token, ...sessao };
@@ -45,6 +48,20 @@ class authservice {
   async cadastrar(dados: CriarPizzariaComDonoDados): Promise<LoginResultado> {
     await pizzariaService.criarComDono(dados);
     return this.login(dados.dono.email, dados.dono.senha);
+  }
+
+  // Troca feita pelo próprio usuário; também libera quem estava com senha provisória
+  async trocarSenha(usuarioId: string, senhaAtual: string, novaSenha: string): Promise<void> {
+    const usuario = await userRepository.findById(usuarioId);
+    const comSenha = usuario && (await userRepository.findByEmail(usuario.email));
+    if (!comSenha || !(await compararSenha(senhaAtual, comSenha.senha_hash))) {
+      throw new AppError("Senha atual incorreta", 401, "SENHA_ATUAL_INCORRETA");
+    }
+    if (senhaAtual === novaSenha) {
+      throw new AppError("A nova senha precisa ser diferente da atual", 400, "SENHA_REPETIDA");
+    }
+
+    await userRepository.edit(usuarioId, { senhaHash: await hashSenha(novaSenha), deveTrocarSenha: false });
   }
 
   // Usado a cada requisição autenticada: reflete na hora desligamentos e trocas de papel,
@@ -62,11 +79,12 @@ class authservice {
       id: usuario.id,
       nome: usuario.nome,
       email: usuario.email,
-      adminPlataforma: usuario.admin_plataforma,
+      admin_plataforma: usuario.admin_plataforma,
+      deve_trocar_senha: usuario.deve_trocar_senha,
     };
 
     if (usuario.admin_plataforma) {
-      return { usuario: dadosUsuario, pizzaria: null, papel: null, membroId: null };
+      return { usuario: dadosUsuario, pizzaria: null, papel: null, membro_id: null };
     }
 
     const membro = await memberRepository.findByUsuario(usuario.id);
@@ -84,7 +102,7 @@ class authservice {
       usuario: dadosUsuario,
       pizzaria: { id: membro.pizzaria_id, nome: membro.pizzaria_nome, slug: membro.pizzaria_slug },
       papel: membro.papel,
-      membroId: membro.id,
+      membro_id: membro.id,
     };
   }
 }

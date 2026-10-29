@@ -6,7 +6,7 @@ import { memberRepository } from "../repositories/member_repository";
 import { hashSenha } from "../utils/senha";
 
 export interface CriarPizzariaComDonoDados {
-  pizzaria: { nome: string; slug: string; telefone?: string | null; fusoHorario?: string };
+  pizzaria: { nome: string; slug: string; telefone?: string | null; fuso_horario?: string };
   dono: { nome: string; email: string; senha: string };
 }
 
@@ -32,7 +32,8 @@ class pizzariaservice {
 
     try {
       return await withTransaction(async (conn) => {
-        const pizzaria = await pizzariaRepository.create(dados.pizzaria, conn);
+        const { fuso_horario, ...pizzariaDados } = dados.pizzaria;
+        const pizzaria = await pizzariaRepository.create({ ...pizzariaDados, fusoHorario: fuso_horario }, conn);
         const usuario = await userRepository.create(
           { nome: dados.dono.nome, email: dados.dono.email, senhaHash },
           conn

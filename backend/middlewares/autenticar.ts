@@ -32,7 +32,24 @@ function lerToken(header: string | undefined): string {
   return token;
 }
 
-export const autenticar: RequestHandler = async (req, _res, next) => {
+function criarAutenticar({ permitirSenhaProvisoria }: { permitirSenhaProvisoria: boolean }): RequestHandler {
+  return async (req, _res, next) => {
+    await carregarAuth(req);
+
+    if (req.auth!.sessao.usuario.deve_trocar_senha && !permitirSenhaProvisoria) {
+      throw new AppError("Troque sua senha provisória para continuar", 403, "TROCA_SENHA_OBRIGATORIA");
+    }
+    next();
+  };
+}
+
+// Padrão para todas as rotas: bloqueia quem ainda está com senha provisória
+export const autenticar = criarAutenticar({ permitirSenhaProvisoria: false });
+
+// Só para /auth/me e /auth/trocar-senha: o app precisa saber que deve trocar e conseguir trocar
+export const autenticarPermitindoSenhaProvisoria = criarAutenticar({ permitirSenhaProvisoria: true });
+
+async function carregarAuth(req: Parameters<RequestHandler>[0]): Promise<void> {
   const token = lerToken(req.headers.authorization);
 
   let payload;
@@ -49,17 +66,16 @@ export const autenticar: RequestHandler = async (req, _res, next) => {
   const sessao = await authService.carregarSessao(payload.sub);
 
   // Token emitido para outra pizzaria ou antes de virar/deixar de ser admin: precisa logar de novo
-  if ((sessao.pizzaria?.id ?? null) !== payload.pizzariaId || sessao.usuario.adminPlataforma !== payload.admin) {
+  if ((sessao.pizzaria?.id ?? null) !== payload.pizzariaId || sessao.usuario.admin_plataforma !== payload.admin) {
     throw new AppError("Sessão desatualizada, faça login novamente", 401, "TOKEN_INVALIDO");
   }
 
   req.auth = {
     usuarioId: sessao.usuario.id,
     pizzariaId: sessao.pizzaria?.id ?? null,
-    membroId: sessao.membroId,
+    membroId: sessao.membro_id,
     papel: sessao.papel,
-    adminPlataforma: sessao.usuario.adminPlataforma,
+    adminPlataforma: sessao.usuario.admin_plataforma,
     sessao,
   };
-  next();
-};
+}

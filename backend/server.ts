@@ -4,6 +4,7 @@ import cors from "cors";
 import { testConnection } from "./db/db";
 import { errorHandler, notFoundHandler } from "./middlewares/error_handler";
 import { authRouter } from "./routers/auth_router";
+import { memberRouter } from "./routers/member_router";
 
 const app = express();
 
@@ -12,6 +13,7 @@ app.use(cors({ origin: env.corsOrigins.includes("*") ? true : env.corsOrigins })
 app.use(express.json());
 
 app.use("/auth", authRouter);
+app.use("/membros", memberRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
