@@ -18,6 +18,9 @@ export interface Membro {
 export interface MembroComPizzaria extends Membro {
   pizzaria_nome: string;
   pizzaria_slug: string;
+  pizzaria_logo_url: string | null;
+  pizzaria_cor_primaria: string | null;
+  pizzaria_fuso_horario: string;
   pizzaria_ativa: boolean;
 }
 
@@ -79,6 +82,9 @@ class memberrepository {
       `SELECT ${COLUNAS},
               p.nome  AS pizzaria_nome,
               p.slug  AS pizzaria_slug,
+              p.logo_url     AS pizzaria_logo_url,
+              p.cor_primaria AS pizzaria_cor_primaria,
+              p.fuso_horario AS pizzaria_fuso_horario,
               p.ativo AS pizzaria_ativa
          FROM membros m
          JOIN pizzarias p ON p.id = m.pizzaria_id

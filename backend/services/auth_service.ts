@@ -11,7 +11,15 @@ import { compararSenha, hashSenha } from "../utils/senha";
 export interface Sessao {
   // deve_trocar_senha = true: senha provisória; o app deve levar para a tela de troca
   usuario: { id: string; nome: string; email: string; admin_plataforma: boolean; deve_trocar_senha: boolean };
-  pizzaria: { id: string; nome: string; slug: string } | null;
+  // Identidade visual e fuso servem a todos os papéis; o resto da configuração fica em GET /pizzaria
+  pizzaria: {
+    id: string;
+    nome: string;
+    slug: string;
+    logo_url: string | null;
+    cor_primaria: string | null;
+    fuso_horario: string;
+  } | null;
   papel: Papel | null;
   membro_id: string | null;
 }
@@ -100,7 +108,14 @@ class authservice {
 
     return {
       usuario: dadosUsuario,
-      pizzaria: { id: membro.pizzaria_id, nome: membro.pizzaria_nome, slug: membro.pizzaria_slug },
+      pizzaria: {
+        id: membro.pizzaria_id,
+        nome: membro.pizzaria_nome,
+        slug: membro.pizzaria_slug,
+        logo_url: membro.pizzaria_logo_url,
+        cor_primaria: membro.pizzaria_cor_primaria,
+        fuso_horario: membro.pizzaria_fuso_horario,
+      },
       papel: membro.papel,
       membro_id: membro.id,
     };

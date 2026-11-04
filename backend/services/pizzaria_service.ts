@@ -1,6 +1,6 @@
 import { withTransaction } from "../db/db";
 import { AppError } from "../errors/app_error";
-import { pizzariaRepository, type Pizzaria } from "../repositories/pizzaria_repository";
+import { pizzariaRepository, type EditarPizzariaDados, type Pizzaria } from "../repositories/pizzaria_repository";
 import { userRepository } from "../repositories/user_repository";
 import { memberRepository } from "../repositories/member_repository";
 import { hashSenha } from "../utils/senha";
@@ -16,10 +16,43 @@ export interface CriarPizzariaComDonoResultado {
 }
 
 const SLUG_EM_USO = () => new AppError("Este endereço (slug) já está em uso", 409, "SLUG_EM_USO");
+const PIZZARIA_NAO_ENCONTRADA = () => new AppError("Pizzaria não encontrada", 404, "PIZZARIA_NAO_ENCONTRADA");
 const EMAIL_EM_USO = () =>
   new AppError("Este email já está cadastrado. Cada usuário pertence a uma única pizzaria.", 409, "EMAIL_EM_USO");
 
+// O dono altera a configuração da loja; `ativo` é só do admin da plataforma
+export type EditarLojaDados = Omit<EditarPizzariaDados, "ativo">;
+
 class pizzariaservice {
+  async buscar(pizzariaId: string): Promise<Pizzaria> {
+    const pizzaria = await pizzariaRepository.findById(pizzariaId);
+    if (!pizzaria) throw PIZZARIA_NAO_ENCONTRADA();
+    return pizzaria;
+  }
+
+  // Mudar o slug muda o endereço do site da pizzaria; links antigos param de funcionar
+  async editarLoja(pizzariaId: string, dados: EditarLojaDados): Promise<Pizzaria> {
+    if (dados.slug !== undefined) {
+      const outra = await pizzariaRepository.findBySlug(dados.slug);
+      if (outra && outra.id !== pizzariaId) throw SLUG_EM_USO();
+    }
+
+    // Monta o objeto campo a campo para nunca repassar `ativo`, mesmo que venha em `dados`
+    const { nome, slug, telefone, logoUrl, corPrimaria, fusoHorario, regraPrecoPizza,
+      tempoAlvoPreparoMin, taxaEntregaPadrao, aceitandoPedidos, pedidoMinimo } = dados;
+
+    try {
+      const editada = await pizzariaRepository.edit(pizzariaId, {
+        nome, slug, telefone, logoUrl, corPrimaria, fusoHorario, regraPrecoPizza,
+        tempoAlvoPreparoMin, taxaEntregaPadrao, aceitandoPedidos, pedidoMinimo,
+      });
+      if (!editada) throw PIZZARIA_NAO_ENCONTRADA();
+      return editada;
+    } catch (error) {
+      if ((error as { code?: string }).code === "ER_DUP_ENTRY") throw SLUG_EM_USO();
+      throw error;
+    }
+  }
 
   // ou cria os três registros (pizzaria, usuário, membro) ou nenhum
   async criarComDono(dados: CriarPizzariaComDonoDados): Promise<CriarPizzariaComDonoResultado> {
