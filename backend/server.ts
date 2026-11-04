@@ -5,6 +5,7 @@ import { testConnection } from "./db/db";
 import { errorHandler, notFoundHandler } from "./middlewares/error_handler";
 import { authRouter } from "./routers/auth_router";
 import { memberRouter } from "./routers/member_router";
+import { categoriaRouter } from "./routers/categoria_router";
 import { tamanhoRouter } from "./routers/tamanho_router";
 import { saborRouter } from "./routers/sabor_router";
 import { bordaRouter } from "./routers/borda_router";
@@ -20,6 +21,7 @@ app.use(express.json());
 
 app.use("/auth", authRouter);
 app.use("/membros", memberRouter);
+app.use("/categorias", categoriaRouter);
 app.use("/tamanhos", tamanhoRouter);
 app.use("/sabores", saborRouter);
 app.use("/bordas", bordaRouter);
