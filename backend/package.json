@@ -7,6 +7,7 @@
     "dev": "tsx watch server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
+    "test": "tsx --test tests/*.test.ts",
     "migrate": "tsx db/migrate.ts",
     "migrate:create": "tsx db/migrate.ts create",
     "seed:admin": "tsx db/seed_admin.ts"

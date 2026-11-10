@@ -1,5 +1,16 @@
 import { z } from "zod";
 
+// Contas de dinheiro são feitas em centavos inteiros: "45.90" → 4590
+export function paraCentavos(valor: string): number {
+  const [inteiro, centavos = ""] = valor.split(".");
+  return Number(inteiro) * 100 + Number(centavos.padEnd(2, "0").slice(0, 2));
+}
+
+// 4590 → "45.90", o mesmo formato que o MySQL devolve para DECIMAL(10,2)
+export function deCentavos(centavos: number): string {
+  return `${Math.trunc(centavos / 100)}.${String(centavos % 100).padStart(2, "0")}`;
+}
+
 // Valor em dinheiro: aceita 45.9, "45.9" ou "45.90" e devolve sempre "45.90", sem fazer conta com float.
 // `campo` só entra nas mensagens de erro (ex.: "taxa inválido")
 export function dinheiroSchema(campo: string) {

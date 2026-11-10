@@ -69,6 +69,16 @@ class produtorepository {
     return rows[0] ? toProduto(rows[0]) : null;
   }
 
+  // Usado para precificar os itens de um pedido numa query só
+  async findByIds(pizzariaId: string, ids: string[], conn: Executor = db): Promise<Produto[]> {
+    if (ids.length === 0) return [];
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT ${COLUNAS} FROM produtos WHERE pizzaria_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+      [pizzariaId, ...ids]
+    );
+    return rows.map(toProduto);
+  }
+
   // Só atualiza os campos enviados; devolve null se o produto não existir nesta pizzaria
   async edit(pizzariaId: string, id: string, dados: EditarProdutoDados, conn: Executor = db): Promise<Produto | null> {
     const colunas: [string, string | boolean | null | undefined][] = [

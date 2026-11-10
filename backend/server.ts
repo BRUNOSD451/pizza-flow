@@ -15,6 +15,8 @@ import { bordaRouter } from "./routers/borda_router";
 import { adicionalRouter } from "./routers/adicional_router";
 import { produtoRouter } from "./routers/produto_router";
 import { cardapioRouter } from "./routers/cardapio_router";
+import { clienteRouter } from "./routers/cliente_router";
+import { pedidoRouter } from "./routers/pedido_router";
 
 const app = express();
 
@@ -34,6 +36,8 @@ app.use("/bordas", bordaRouter);
 app.use("/adicionais", adicionalRouter);
 app.use("/produtos", produtoRouter);
 app.use("/cardapio", cardapioRouter);
+app.use("/clientes", clienteRouter);
+app.use("/pedidos", pedidoRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

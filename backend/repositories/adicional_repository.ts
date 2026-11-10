@@ -79,6 +79,16 @@ class adicionalrepository {
     return adicional;
   }
 
+  // Usado para precificar os itens de um pedido numa query só
+  async findByIds(pizzariaId: string, ids: string[], conn: Executor = db): Promise<AdicionalComPrecos[]> {
+    if (ids.length === 0) return [];
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT ${COLUNAS} FROM adicionais WHERE pizzaria_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+      [pizzariaId, ...ids]
+    );
+    return this.comPrecos(pizzariaId, rows.map(toAdicional), conn);
+  }
+
   // Só atualiza os campos enviados; devolve false se o adicional não existir nesta pizzaria
   async edit(pizzariaId: string, id: string, dados: EditarAdicionalDados, conn: Executor = db): Promise<boolean> {
     const colunas: [string, string | boolean | undefined][] = [

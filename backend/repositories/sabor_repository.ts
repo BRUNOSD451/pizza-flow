@@ -88,6 +88,16 @@ class saborrepository {
     return sabor;
   }
 
+  // Usado para precificar os itens de um pedido numa query só
+  async findByIds(pizzariaId: string, ids: string[], conn: Executor = db): Promise<SaborComPrecos[]> {
+    if (ids.length === 0) return [];
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT ${COLUNAS} FROM sabores WHERE pizzaria_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+      [pizzariaId, ...ids]
+    );
+    return this.comPrecos(pizzariaId, rows.map(toSabor), conn);
+  }
+
   // Só atualiza os campos enviados; devolve false se o sabor não existir nesta pizzaria
   async edit(pizzariaId: string, id: string, dados: EditarSaborDados, conn: Executor = db): Promise<boolean> {
     const colunas: [string, string | boolean | null | undefined][] = [

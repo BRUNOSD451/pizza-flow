@@ -22,7 +22,7 @@ const slugSchema = z
   .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Use só letras minúsculas, números e hífen (ex.: pizzaria-do-ze)");
 
 // Salvo só com dígitos, com DDD
-const telefoneSchema = z
+export const telefoneSchema = z
   .string()
   .transform((t) => t.replace(/\D/g, ""))
   .refine((t) => t.length === 10 || t.length === 11, "Telefone deve ter DDD + número (10 ou 11 dígitos)");

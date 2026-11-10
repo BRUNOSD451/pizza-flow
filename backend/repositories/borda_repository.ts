@@ -65,6 +65,16 @@ class bordarepository {
     return borda;
   }
 
+  // Usado para precificar os itens de um pedido numa query só
+  async findByIds(pizzariaId: string, ids: string[], conn: Executor = db): Promise<BordaComPrecos[]> {
+    if (ids.length === 0) return [];
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT ${COLUNAS} FROM bordas WHERE pizzaria_id = ? AND id IN (${ids.map(() => "?").join(", ")})`,
+      [pizzariaId, ...ids]
+    );
+    return this.comPrecos(pizzariaId, rows.map(toBorda), conn);
+  }
+
   // Só atualiza os campos enviados; devolve false se a borda não existir nesta pizzaria
   async edit(pizzariaId: string, id: string, dados: EditarBordaDados, conn: Executor = db): Promise<boolean> {
     const colunas: [string, string | boolean | undefined][] = [

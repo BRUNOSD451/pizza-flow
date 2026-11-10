@@ -153,6 +153,20 @@ class pizzariarepository {
 
     return this.findById(id, conn);
   }
+
+  // Trava a linha da pizzaria até o fim da transação: pedidos da mesma pizzaria entram em fila.
+  // Precisa ser a primeira leitura da transação, para as seguintes enxergarem o que já foi commitado.
+  async bloquearNumeracaoPedido(id: string, conn: Executor): Promise<number> {
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      "SELECT ultimo_numero_pedido FROM pizzarias WHERE id = ? FOR UPDATE",
+      [id]
+    );
+    return rows[0].ultimo_numero_pedido;
+  }
+
+  async salvarNumeracaoPedido(id: string, numero: number, conn: Executor): Promise<void> {
+    await conn.execute("UPDATE pizzarias SET ultimo_numero_pedido = ? WHERE id = ?", [numero, id]);
+  }
 }
 
 export const pizzariaRepository = new pizzariarepository();
