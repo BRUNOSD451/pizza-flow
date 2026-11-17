@@ -30,6 +30,8 @@ export interface Pedido {
   cliente_id: string | null;
   cliente_nome: string | null;
   cliente_telefone: string | null;
+  // Nome da mesa quando o pedido é de uma comanda do salão
+  mesa_nome: string | null;
   criado_por: string | null;
   entregador_id: string | null;
   comanda_id: string | null;
@@ -49,6 +51,8 @@ export interface Pedido {
   cancelado_em: Date | null;
   motivo_cancelamento: string | null;
   atualizado_em: Date;
+  // Soma dos pagamentos com status 'pago' (pedido de comanda é pago na comanda, então fica 0)
+  valor_pago: string;
 }
 
 export interface PedidoItemSabor {
@@ -99,15 +103,23 @@ export interface PedidoParaAlterar {
   status: StatusPedido;
   tipo: TipoPedido;
   entregador_id: string | null;
+  comanda_id: string | null;
+  total: string;
 }
+
+// Pedidos internos já nascem aceitos; os do site esperam o aceite da loja
+export type StatusInicialPedido = "recebido" | "aguardando_aceite";
 
 export interface CriarPedidoDados {
   numero: number;
   chaveIdempotencia: string;
   tipo: TipoPedido;
   origem: OrigemPedido;
+  status: StatusInicialPedido;
   clienteId: string | null;
-  criadoPor: string;
+  // null só para pedidos do site/ifood
+  criadoPor: string | null;
+  comandaId: string | null;
   areaEntregaId: string | null;
   enderecoEntrega: EnderecoEntrega | null;
   totais: TotaisPedido;
@@ -128,9 +140,13 @@ const COLUNAS = `p.id, p.pizzaria_id, p.numero, p.chave_idempotencia, p.tipo, p.
   p.subtotal, p.desconto, p.taxa_entrega, p.total, p.observacao, p.criado_em, p.aceito_em, p.preparo_em,
   p.pronto_em, p.saiu_em, p.finalizado_em, p.cancelado_em, p.motivo_cancelamento, p.atualizado_em`;
 
-const SELECT_PEDIDO = `SELECT ${COLUNAS}, c.nome AS cliente_nome, c.telefone AS cliente_telefone
+const SELECT_PEDIDO = `SELECT ${COLUNAS}, c.nome AS cliente_nome, c.telefone AS cliente_telefone, me.nome AS mesa_nome,
+  (SELECT COALESCE(SUM(pg.valor), 0) FROM pagamentos pg
+    WHERE pg.pizzaria_id = p.pizzaria_id AND pg.pedido_id = p.id AND pg.status = 'pago') AS valor_pago
   FROM pedidos p
-  LEFT JOIN clientes c ON c.pizzaria_id = p.pizzaria_id AND c.id = p.cliente_id`;
+  LEFT JOIN clientes c ON c.pizzaria_id = p.pizzaria_id AND c.id = p.cliente_id
+  LEFT JOIN comandas co ON co.pizzaria_id = p.pizzaria_id AND co.id = p.comanda_id
+  LEFT JOIN mesas me ON me.pizzaria_id = co.pizzaria_id AND me.id = co.mesa_id`;
 
 // Coluna de data preenchida quando o pedido chega em cada status
 const COLUNA_DATA_STATUS: Partial<Record<StatusPedido, string>> = {
@@ -149,11 +165,12 @@ function marcadores(valores: unknown[]): string {
 class pedidorepository {
   async create(pizzariaId: string, dados: CriarPedidoDados, conn: Executor = db): Promise<string> {
     const id = randomUUID();
-    // Pedidos internos já nascem aceitos
+    // aceito_em só é preenchido para quem já nasce aceito
     await conn.execute(
       `INSERT INTO pedidos (id, pizzaria_id, numero, chave_idempotencia, tipo, origem, status, cliente_id, criado_por,
-                            area_entrega_id, endereco_entrega, subtotal, desconto, taxa_entrega, total, observacao, aceito_em)
-       VALUES (?, ?, ?, ?, ?, ?, 'recebido', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+                            comanda_id, area_entrega_id, endereco_entrega, subtotal, desconto, taxa_entrega, total,
+                            observacao, aceito_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, IF(? = 'recebido', NOW(), NULL))`,
       [
         id,
         pizzariaId,
@@ -161,8 +178,10 @@ class pedidorepository {
         dados.chaveIdempotencia,
         dados.tipo,
         dados.origem,
+        dados.status,
         dados.clienteId,
         dados.criadoPor,
+        dados.comandaId,
         dados.areaEntregaId,
         dados.enderecoEntrega ? JSON.stringify(dados.enderecoEntrega) : null,
         dados.totais.subtotal,
@@ -170,6 +189,7 @@ class pedidorepository {
         dados.totais.taxaEntrega,
         dados.totais.total,
         dados.observacao,
+        dados.status,
       ]
     );
     return id;
@@ -270,7 +290,7 @@ class pedidorepository {
   // Trava só a linha do pedido até o fim da transação: duas mudanças de status não se atropelam
   async bloquear(pizzariaId: string, id: string, conn: Executor): Promise<PedidoParaAlterar | null> {
     const [rows] = await conn.execute<RowDataPacket[]>(
-      "SELECT id, status, tipo, entregador_id FROM pedidos WHERE pizzaria_id = ? AND id = ? FOR UPDATE",
+      "SELECT id, status, tipo, entregador_id, comanda_id, total FROM pedidos WHERE pizzaria_id = ? AND id = ? FOR UPDATE",
       [pizzariaId, id]
     );
     return (rows[0] as PedidoParaAlterar | undefined) ?? null;
@@ -349,6 +369,25 @@ class pedidorepository {
       [pizzariaId, entregadorId, ...status]
     );
     return rows as Pedido[];
+  }
+
+  // Pedidos de uma comanda, na ordem em que foram lançados
+  async listarDaComanda(pizzariaId: string, comandaId: string, conn: Executor = db): Promise<Pedido[]> {
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `${SELECT_PEDIDO} WHERE p.pizzaria_id = ? AND p.comanda_id = ? ORDER BY p.criado_em, p.numero`,
+      [pizzariaId, comandaId]
+    );
+    return rows as Pedido[];
+  }
+
+  // Trava os pedidos da comanda para fechar a conta sem um pedido mudar no meio
+  async bloquearDaComanda(pizzariaId: string, comandaId: string, conn: Executor): Promise<PedidoParaAlterar[]> {
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT id, status, tipo, entregador_id, comanda_id, total FROM pedidos
+        WHERE pizzaria_id = ? AND comanda_id = ? FOR UPDATE`,
+      [pizzariaId, comandaId]
+    );
+    return rows as PedidoParaAlterar[];
   }
 
   async listarEventos(pizzariaId: string, pedidoId: string, conn: Executor = db): Promise<PedidoEvento[]> {

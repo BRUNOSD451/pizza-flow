@@ -30,6 +30,11 @@ class membercontroller {
     res.json(await memberService.listar(req.auth!.pizzariaId!));
   };
 
+  // GET /membros/entregadores
+  entregadores = async (req: Request, res: Response) => {
+    res.json(await memberService.listarEntregadores(req.auth!.pizzariaId!));
+  };
+
   // POST /membros → devolve a senha provisória UMA vez, para o dono repassar ao funcionário
   create = async (req: Request, res: Response) => {
     const dados = criarSchema.parse(req.body ?? {});

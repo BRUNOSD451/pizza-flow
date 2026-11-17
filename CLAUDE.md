@@ -80,7 +80,8 @@ Padrões:
 - **Rotas protegidas**: `autenticar` → `exigirPapel("dono", "gerente")` ou `exigirAdminPlataforma`. O `pizzariaId` vem de `req.auth`, nunca do body.
 - **Transações**: `withTransaction(async (conn) => { ... })` de `db/db.ts`; passe `conn` a todos os repositories envolvidos. Faça trabalho lento (bcrypt, chamadas externas) antes de abrir a transação.
 - **Erros**: `throw new AppError(mensagem, status, CODIGO)` no service; o `error_handler` formata. `ER_DUP_ENTRY` vira 409 com mensagem amigável no service.
-- **Rotas do admin** (quando existirem) ficam sob `/admin/*` com `autenticar` + `exigirAdminPlataforma` aplicados no router.
+- **Rotas do admin** ficam sob `/admin/*` com `autenticar` + `exigirAdminPlataforma` aplicados no router.
+- **Rotas públicas do site** ficam sob `/site/:slug/*` (sem login). Pizzaria inativa responde 404; nada de dados internos (equipe, ids de membro, outros clientes).
 
 ## Comandos
 
@@ -135,7 +136,27 @@ qualquer status não final → cancelado (exige motivo_cancelamento)
 ```
 - Pedidos internos (balcão, salão) já nascem em `recebido`; os do site/iFood nascem em `aguardando_aceite`.
 - Cada transição: atualiza o timestamp correspondente (`aceito_em`, `preparo_em`, `pronto_em`, `saiu_em`, `finalizado_em`, `cancelado_em`) **e** insere em `pedido_eventos` (com `membro_id`, NULL quando automático/site), tudo na mesma transação.
-- Valide a transição no service e também se o papel pode fazê-la (ex.: cozinha não finaliza delivery).
+- Valide a transição no service e também se o papel pode fazê-la (ex.: cozinha não finaliza delivery). O garçom finaliza `pronto → finalizado` só de pedido `local`.
+- Visibilidade (`podeVerPedido`): entregador só vê os atribuídos a ele; garçom só os de comanda. Para os outros, 404.
+
+### Pagamentos
+- Um pagamento é de um pedido **ou** de uma comanda. Pedido de comanda é pago na comanda (`PAGAR_NA_COMANDA`).
+- `pendente` = combinado para depois (paga na entrega; o site cria um com o valor total e a forma escolhida). `pago` preenche `pago_em`.
+- Soma de `pago` + `pendente` nunca passa do total; troco vai em `troco_para` (só dinheiro, ≥ valor).
+- Mudanças: `pendente → pago` (quem registra, inclusive entregador; pode corrigir a forma), `pendente → estornado` (todos menos entregador), `pago → estornado` (só dono/gerente).
+- Finalizar pedido **não** exige pagamento (fiado, iFood). As respostas trazem `valor_pago` / `resumo.restante` para o front avisar.
+
+### Salão (mesas e comandas)
+- Abrir comanda: mesa ativa e sem comanda aberta (409 `MESA_OCUPADA`); quem abre fica em `garcom_id`.
+- Pedidos da comanda (`POST /comandas/:id/pedidos`): sempre `tipo='local'`, `origem='salao'`, nascem `recebido`; a comanda é travada na transação.
+- Fechar (`taxa_servico_percentual` 0–20): exige nenhum pedido em preparo, finaliza os `pronto`, grava `taxa_servico` (valor) e libera a mesa. **Pagamentos só depois de fechada** (podem ser divididos).
+- Cancelar comanda: só dono/gerente, todos os pedidos já cancelados.
+
+### Site do cliente
+- Pedido só com `aceitando_pedidos` e dentro do horário (`estaAberta`, no `fuso_horario`); subtotal ≥ `pedido_minimo`.
+- Cliente achado pelo telefone **sem alterar o cadastro existente**; criado na mesma transação do pedido se não existir. O endereço digitado não é salvo em `enderecos`, só copiado no pedido.
+- Com áreas de entrega ativas, o delivery exige `area_entrega_id` (taxa da área); sem nenhuma, vale o bairro digitado e `taxa_entrega_padrao`.
+- Acompanhamento: `GET /site/:slug/pedidos/:id` (o UUID é o código), só pedidos `origem='site'`.
 
 ## Pendências conhecidas no modelo
 - Assinatura do SaaS (planos, cobrança por pizzaria): ainda não há tabelas.

@@ -44,6 +44,27 @@ function descrever(h: HorarioDados): string {
   return `${DIAS[h.diaSemana]} ${h.abre}–${h.fecha}`;
 }
 
+const DIAS_INTL = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// Minuto da semana (0 = domingo 00:00) no fuso da pizzaria
+export function minutoDaSemana(agora: Date, fuso: string): number {
+  const partes = new Intl.DateTimeFormat("en-US", {
+    timeZone: fuso,
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(agora);
+  const valor = (tipo: string) => partes.find((p) => p.type === tipo)!.value;
+  return DIAS_INTL.indexOf(valor("weekday")) * MIN_DIA + Number(valor("hour")) * 60 + Number(valor("minute"));
+}
+
+// Sem horário cadastrado = fechada. O turno que começou ontem e vira a noite conta hoje
+export function estaAberta(horarios: HorarioDados[], fuso: string, agora: Date = new Date()): boolean {
+  const minuto = minutoDaSemana(agora, fuso);
+  return horarios.some((h) => trechosDaSemana(h).some(([inicio, fim]) => minuto >= inicio && minuto < fim));
+}
+
 // Turnos encostados (um fecha 15:00, outro abre 15:00) são permitidos; sobrepostos não
 export function validarSobreposicao(horarios: HorarioDados[]): void {
   const trechos = horarios

@@ -10,6 +10,8 @@ memberRouter.use(autenticar);
 
 // Gerente consulta a equipe; só o dono cadastra e altera membros
 memberRouter.get("/", exigirPapel("dono", "gerente"), memberController.list);
+// Quem atribui entregador ao pedido precisa da lista (só id e nome)
+memberRouter.get("/entregadores", exigirPapel("dono", "gerente", "atendente"), memberController.entregadores);
 memberRouter.post("/", exigirPapel("dono"), memberController.create);
 memberRouter.patch("/:id", exigirPapel("dono"), memberController.edit);
 memberRouter.post("/:id/resetar-senha", exigirPapel("dono"), memberController.resetarSenha);

@@ -42,7 +42,9 @@ const REGRAS: Regra[] = [
   { de: "preparando", para: "pronto", papeis: [...GESTAO, "cozinha"] },
   { de: "pronto", para: "saiu_para_entrega", tipos: ["delivery"], papeis: [...GESTAO, "entregador"] },
   { de: "saiu_para_entrega", para: "finalizado", tipos: ["delivery"], papeis: [...GESTAO, "entregador"] },
-  { de: "pronto", para: "finalizado", tipos: ["retirada", "local"], papeis: [...GESTAO, "atendente"] },
+  { de: "pronto", para: "finalizado", tipos: ["retirada"], papeis: [...GESTAO, "atendente"] },
+  // No salão, o garçom entrega na mesa
+  { de: "pronto", para: "finalizado", tipos: ["local"], papeis: [...GESTAO, "atendente", "garcom"] },
   // O atendente só cancela ao recusar um pedido que ainda não foi aceito
   ...NAO_FINAIS.map(
     (de): Regra => ({ de, para: "cancelado", papeis: de === "aguardando_aceite" ? [...GESTAO, "atendente"] : GESTAO })
@@ -65,4 +67,15 @@ export function validarTransicao(t: Transicao): void {
   if (t.statusNovo === "saiu_para_entrega" && !t.entregadorId) {
     throw new AppError("Atribua um entregador antes de o pedido sair", 400, "ENTREGADOR_NAO_ATRIBUIDO");
   }
+}
+
+// Entregador só enxerga os pedidos atribuídos a ele; garçom, só os do salão (de comanda).
+// Para os outros o pedido "não existe": quem chama responde 404
+export function podeVerPedido(
+  quem: { papel: Papel | null; membroId: string | null },
+  pedido: { entregador_id: string | null; comanda_id: string | null }
+): boolean {
+  if (quem.papel === "entregador") return pedido.entregador_id === quem.membroId;
+  if (quem.papel === "garcom") return pedido.comanda_id !== null;
+  return true;
 }

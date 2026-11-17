@@ -6,7 +6,7 @@ import { STATUS_PEDIDO, TIPOS_PEDIDO } from "../services/pedido_transicoes";
 import { dinheiroSchema } from "../utils/preco";
 
 const tipoSchema = z.enum(TIPOS_PEDIDO, `Tipo inválido. Use: ${TIPOS_PEDIDO.join(", ")}`);
-const observacaoSchema = z.string("observacao deve ser texto").trim().max(500, "Observação muito longa").nullable().default(null);
+export const observacaoSchema = z.string("observacao deve ser texto").trim().max(500, "Observação muito longa").nullable().default(null);
 const quantidadeSchema = z.int("quantidade deve ser um número inteiro").min(1, "quantidade mínima é 1").max(99, "quantidade máxima é 99").default(1);
 
 const adicionaisSchema = z
@@ -48,7 +48,8 @@ const itemProdutoSchema = z.object({
   observacao: observacaoSchema,
 });
 
-const itemSchema = z
+// Usado também pela comanda e pelo site
+export const itemSchema = z
   .discriminatedUnion("tipo", [itemPizzaSchema, itemProdutoSchema], "tipo do item deve ser 'pizza' ou 'produto'")
   .transform((item): ItemSolicitado => {
     const adicionais = item.adicionais.map((a) => ({ adicionalId: a.adicional_id, quantidade: a.quantidade }));
@@ -63,16 +64,25 @@ const itemSchema = z
     };
   });
 
+// Gerada pelo front a cada tentativa de finalizar: repetir o envio devolve o mesmo pedido
+export const chaveIdempotenciaSchema = z
+  .string("Informe chave_idempotencia")
+  .trim()
+  .min(8, "chave_idempotencia muito curta")
+  .max(64, "chave_idempotencia muito longa");
+
+export const itensSchema = z.array(itemSchema, "Informe os itens").min(1, "Informe ao menos um item").max(50, "Itens demais no pedido");
+
 const criarSchema = z
   .object({
-    chave_idempotencia: z.string("Informe chave_idempotencia").trim().min(8, "chave_idempotencia muito curta").max(64, "chave_idempotencia muito longa"),
+    chave_idempotencia: chaveIdempotenciaSchema,
     tipo: tipoSchema,
     origem: z.enum(["balcao", "whatsapp"], "origem deve ser 'balcao' ou 'whatsapp'").default("balcao"),
     cliente_id: z.uuid("cliente_id inválido").nullable().default(null),
     endereco_id: z.uuid("endereco_id inválido").nullable().default(null),
     desconto: dinheiroSchema("desconto").default("0.00"),
     observacao: observacaoSchema,
-    itens: z.array(itemSchema, "Informe os itens").min(1, "Informe ao menos um item").max(50, "Itens demais no pedido"),
+    itens: itensSchema,
   })
   .refine((dados) => dados.tipo !== "delivery" || (dados.cliente_id && dados.endereco_id), {
     error: "Delivery exige cliente_id e endereco_id",

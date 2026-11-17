@@ -17,6 +17,10 @@ import { produtoRouter } from "./routers/produto_router";
 import { cardapioRouter } from "./routers/cardapio_router";
 import { clienteRouter } from "./routers/cliente_router";
 import { pedidoRouter } from "./routers/pedido_router";
+import { mesaRouter } from "./routers/mesa_router";
+import { comandaRouter } from "./routers/comanda_router";
+import { siteRouter } from "./routers/site_router";
+import { adminRouter } from "./routers/admin_router";
 
 const app = express();
 
@@ -38,6 +42,10 @@ app.use("/produtos", produtoRouter);
 app.use("/cardapio", cardapioRouter);
 app.use("/clientes", clienteRouter);
 app.use("/pedidos", pedidoRouter);
+app.use("/mesas", mesaRouter);
+app.use("/comandas", comandaRouter);
+app.use("/site", siteRouter);
+app.use("/admin", adminRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

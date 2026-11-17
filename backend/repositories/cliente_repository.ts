@@ -79,6 +79,16 @@ class clienterepository {
     return (rows[0] as Cliente | undefined) ?? null;
   }
 
+  // Site do cliente: leitura travada (sempre vê o que já foi gravado) e impede outro cadastro
+  // do mesmo telefone até o fim da transação
+  async bloquearPorTelefone(pizzariaId: string, telefone: string, conn: Executor): Promise<Cliente | null> {
+    const [rows] = await conn.execute<RowDataPacket[]>(
+      `SELECT ${COLUNAS} FROM clientes WHERE pizzaria_id = ? AND telefone = ? FOR UPDATE`,
+      [pizzariaId, telefone]
+    );
+    return (rows[0] as Cliente | undefined) ?? null;
+  }
+
   // Só atualiza os campos enviados; devolve null se o cliente não existir nesta pizzaria
   async edit(pizzariaId: string, id: string, dados: EditarClienteDados, conn: Executor = db): Promise<Cliente | null> {
     const colunas: [string, string | null | undefined][] = [

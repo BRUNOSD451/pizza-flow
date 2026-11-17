@@ -33,3 +33,20 @@ export const loginRateLimit = rateLimit({
     });
   },
 });
+
+// Pedidos do site são públicos: limita para ninguém encher a fila da cozinha com pedidos falsos.
+// Envios repetidos (mesma chave de idempotência) também contam
+export const pedidoSiteRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({
+      erro: {
+        mensagem: "Muitos pedidos feitos a partir desta rede. Tente novamente em alguns minutos.",
+        codigo: "MUITAS_TENTATIVAS",
+      },
+    });
+  },
+});

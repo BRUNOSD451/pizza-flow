@@ -1,5 +1,6 @@
 import { withTransaction } from "../db/db";
 import { AppError } from "../errors/app_error";
+import type { PoolConnection } from "mysql2/promise";
 import type { AuthContext } from "../middlewares/autenticar";
 import { adicionalRepository } from "../repositories/adicional_repository";
 import { areaEntregaRepository } from "../repositories/area_entrega_repository";
@@ -8,6 +9,7 @@ import { categoriaRepository } from "../repositories/categoria_repository";
 import { clienteRepository } from "../repositories/cliente_repository";
 import { enderecoRepository } from "../repositories/endereco_repository";
 import { memberRepository, type Papel } from "../repositories/member_repository";
+import { pagamentoRepository, type FormaPagamento, type Pagamento } from "../repositories/pagamento_repository";
 import {
   pedidoRepository,
   type EnderecoEntrega,
@@ -16,14 +18,16 @@ import {
   type Pedido,
   type PedidoComItens,
   type PedidoEvento,
+  type StatusInicialPedido,
 } from "../repositories/pedido_repository";
 import { pizzariaRepository, type Pizzaria } from "../repositories/pizzaria_repository";
 import { produtoRepository } from "../repositories/produto_repository";
 import { saborRepository } from "../repositories/sabor_repository";
 import { tamanhoRepository } from "../repositories/tamanho_repository";
-import { paraCentavos } from "../utils/preco";
+import { deCentavos, paraCentavos } from "../utils/preco";
+import { validarTroco } from "./pagamento_regras";
 import { calcularItens, calcularTotais, type CatalogoPedido, type ItemSolicitado } from "./pedido_calculo";
-import { validarTransicao, type StatusPedido, type TipoPedido } from "./pedido_transicoes";
+import { podeVerPedido, validarTransicao, type StatusPedido, type TipoPedido } from "./pedido_transicoes";
 
 export interface CriarPedidoEntrada {
   chaveIdempotencia: string;
@@ -38,6 +42,37 @@ export interface CriarPedidoEntrada {
 
 export interface PedidoCompleto extends PedidoComItens {
   eventos: PedidoEvento[];
+  pagamentos: Pagamento[];
+}
+
+// Entrega já resolvida por quem chama: o balcão usa o endereço cadastrado; o site, o digitado pelo cliente
+export interface EntregaResolvida {
+  endereco: EnderecoEntrega | null;
+  areaEntregaId: string | null;
+  taxa: string;
+}
+
+// Base comum a todos os pedidos (balcão, comanda, site). Quem chama valida o que é próprio da origem
+export interface NovoPedido {
+  chaveIdempotencia: string;
+  tipo: TipoPedido;
+  origem: OrigemPedido;
+  status: StatusInicialPedido;
+  clienteId: string | null;
+  criadoPor: string | null;
+  comandaId: string | null;
+  entrega: EntregaResolvida;
+  desconto: string;
+  observacao: string | null;
+  itens: ItemSolicitado[];
+  // Site: o subtotal precisa atingir o pedido mínimo da loja
+  exigirPedidoMinimo?: boolean;
+  // Site: a forma escolhida pelo cliente vira um pagamento pendente com o valor total
+  pagamentoPendente?: { forma: FormaPagamento; trocoPara: string | null };
+  // Roda dentro da transação, com a numeração já travada (ex.: conferir se a comanda continua aberta)
+  validarNaTransacao?: (conn: PoolConnection) => Promise<void>;
+  // Site: acha ou cadastra o cliente pelo telefone só quando o pedido já passou nas validações
+  resolverCliente?: (conn: PoolConnection) => Promise<string>;
 }
 
 // A cozinha não vê valores, endereço nem dados do cliente
@@ -47,6 +82,7 @@ export interface PedidoCozinha {
   tipo: TipoPedido;
   origem: OrigemPedido;
   status: StatusPedido;
+  mesa_nome: string | null;
   observacao: string | null;
   criado_em: Date;
   aceito_em: Date | null;
@@ -83,6 +119,7 @@ function paraCozinha(pedido: PedidoComItens): PedidoCozinha {
     tipo: pedido.tipo,
     origem: pedido.origem,
     status: pedido.status,
+    mesa_nome: pedido.mesa_nome,
     observacao: pedido.observacao,
     criado_em: pedido.criado_em,
     aceito_em: pedido.aceito_em,
@@ -101,32 +138,63 @@ function paraCozinha(pedido: PedidoComItens): PedidoCozinha {
   };
 }
 
+export function validarDesconto(auth: AuthContext, desconto: string): void {
+  if (paraCentavos(desconto) > 0 && !PODEM_DAR_DESCONTO.includes(auth.papel!)) {
+    throw new AppError("Só o dono ou o gerente podem dar desconto", 403, "SEM_PERMISSAO");
+  }
+}
+
 class pedidoservice {
-  // `criado` = false quando a chave de idempotência já existia e o pedido devolvido é o original
+  // Balcão e WhatsApp. `criado` = false quando a chave de idempotência já existia e o pedido devolvido é o original
   async criar(auth: AuthContext, dados: CriarPedidoEntrada): Promise<{ pedido: PedidoCompleto; criado: boolean }> {
     const pizzariaId = auth.pizzariaId!;
-
-    if (paraCentavos(dados.desconto) > 0 && !PODEM_DAR_DESCONTO.includes(auth.papel!)) {
-      throw new AppError("Só o dono ou o gerente podem dar desconto", 403, "SEM_PERMISSAO");
-    }
+    validarDesconto(auth, dados.desconto);
 
     const existente = await pedidoRepository.findIdByChave(pizzariaId, dados.chaveIdempotencia);
     if (existente) return { pedido: await this.completo(pizzariaId, existente), criado: false };
 
     const pizzaria = (await pizzariaRepository.findById(pizzariaId))!;
-    const entrega = await this.resolverEntrega(pizzaria, dados);
-    const catalogo = await this.carregarCatalogo(pizzariaId, dados.itens);
+    const { pedidoId, criado } = await this.registrar(pizzaria, {
+      ...dados,
+      status: "recebido",
+      criadoPor: auth.membroId!,
+      comandaId: null,
+      entrega: await this.resolverEntrega(pizzaria, dados),
+    });
+    return { pedido: await this.completo(pizzariaId, pedidoId), criado };
+  }
 
-    const itens = calcularItens(catalogo, dados.itens, pizzaria.regra_preco_pizza);
-    const totais = calcularTotais(itens, dados.desconto, entrega.taxa);
+  // Calcula os preços no backend e grava pedido, itens, evento inicial e (no site) o pagamento combinado.
+  // Lê o catálogo antes de abrir a transação, para não segurar a conexão
+  async registrar(pizzaria: Pizzaria, novo: NovoPedido): Promise<{ pedidoId: string; criado: boolean }> {
+    const pizzariaId = pizzaria.id;
+
+    const existente = await pedidoRepository.findIdByChave(pizzariaId, novo.chaveIdempotencia);
+    if (existente) return { pedidoId: existente, criado: false };
+
+    const catalogo = await this.carregarCatalogo(pizzariaId, novo.itens);
+    const itens = calcularItens(catalogo, novo.itens, pizzaria.regra_preco_pizza);
+    const totais = calcularTotais(itens, novo.desconto, novo.entrega.taxa);
+
+    if (novo.exigirPedidoMinimo && paraCentavos(totais.subtotal) < paraCentavos(pizzaria.pedido_minimo)) {
+      throw new AppError(
+        `O pedido mínimo é R$ ${deCentavos(paraCentavos(pizzaria.pedido_minimo))} (sem a taxa de entrega)`,
+        400,
+        "PEDIDO_MINIMO"
+      );
+    }
+    if (novo.pagamentoPendente) validarTroco(novo.pagamentoPendente.forma, totais.total, novo.pagamentoPendente.trocoPara);
 
     try {
-      const { pedidoId, criado } = await withTransaction(async (conn) => {
+      return await withTransaction(async (conn) => {
         const ultimoNumero = await pizzariaRepository.bloquearNumeracaoPedido(pizzariaId, conn);
 
         // Com a numeração travada, um envio repetido que estava em paralelo já foi gravado e aparece aqui
-        const repetido = await pedidoRepository.findIdByChave(pizzariaId, dados.chaveIdempotencia, conn);
+        const repetido = await pedidoRepository.findIdByChave(pizzariaId, novo.chaveIdempotencia, conn);
         if (repetido) return { pedidoId: repetido, criado: false };
+
+        await novo.validarNaTransacao?.(conn);
+        const clienteId = novo.resolverCliente ? await novo.resolverCliente(conn) : novo.clienteId;
 
         const numero = ultimoNumero + 1;
         await pizzariaRepository.salvarNumeracaoPedido(pizzariaId, numero, conn);
@@ -135,29 +203,38 @@ class pedidoservice {
           pizzariaId,
           {
             numero,
-            chaveIdempotencia: dados.chaveIdempotencia,
-            tipo: dados.tipo,
-            origem: dados.origem,
-            clienteId: dados.clienteId,
-            criadoPor: auth.membroId!,
-            areaEntregaId: entrega.areaEntregaId,
-            enderecoEntrega: entrega.endereco,
+            chaveIdempotencia: novo.chaveIdempotencia,
+            tipo: novo.tipo,
+            origem: novo.origem,
+            status: novo.status,
+            clienteId,
+            criadoPor: novo.criadoPor,
+            comandaId: novo.comandaId,
+            areaEntregaId: novo.entrega.areaEntregaId,
+            enderecoEntrega: novo.entrega.endereco,
             totais,
-            observacao: dados.observacao,
+            observacao: novo.observacao,
           },
           conn
         );
         await pedidoRepository.inserirItens(pizzariaId, id, itens, conn);
-        await pedidoRepository.inserirEvento(pizzariaId, id, null, "recebido", auth.membroId, conn);
+        await pedidoRepository.inserirEvento(pizzariaId, id, null, novo.status, novo.criadoPor, conn);
+
+        if (novo.pagamentoPendente && paraCentavos(totais.total) > 0) {
+          await pagamentoRepository.create(
+            pizzariaId,
+            { pedidoId: id },
+            { ...novo.pagamentoPendente, valor: totais.total, status: "pendente" },
+            conn
+          );
+        }
         return { pedidoId: id, criado: true };
       });
-
-      return { pedido: await this.completo(pizzariaId, pedidoId), criado };
     } catch (error) {
       const err = error as { code?: string; message?: string };
       if (err.code === "ER_DUP_ENTRY" && err.message?.includes("uq_pedidos_idempotencia")) {
-        const original = await pedidoRepository.findIdByChave(pizzariaId, dados.chaveIdempotencia);
-        if (original) return { pedido: await this.completo(pizzariaId, original), criado: false };
+        const original = await pedidoRepository.findIdByChave(pizzariaId, novo.chaveIdempotencia);
+        if (original) return { pedidoId: original, criado: false };
       }
       throw error;
     }
@@ -182,7 +259,7 @@ class pedidoservice {
   async buscar(auth: AuthContext, pedidoId: string): Promise<PedidoCompleto | PedidoCozinha> {
     const pizzariaId = auth.pizzariaId!;
     const pedido = await pedidoRepository.findById(pizzariaId, pedidoId);
-    if (!pedido || !this.podeVer(auth, pedido.entregador_id)) throw PEDIDO_NAO_ENCONTRADO();
+    if (!pedido || !podeVerPedido(auth, pedido)) throw PEDIDO_NAO_ENCONTRADO();
 
     if (auth.papel === "cozinha") {
       const [comItens] = await pedidoRepository.comItens(pizzariaId, [pedido]);
@@ -201,7 +278,7 @@ class pedidoservice {
 
     await withTransaction(async (conn) => {
       const atual = await pedidoRepository.bloquear(pizzariaId, pedidoId, conn);
-      if (!atual || !this.podeVer(auth, atual.entregador_id)) throw PEDIDO_NAO_ENCONTRADO();
+      if (!atual || !podeVerPedido(auth, atual)) throw PEDIDO_NAO_ENCONTRADO();
 
       validarTransicao({
         statusAtual: atual.status,
@@ -245,30 +322,23 @@ class pedidoservice {
     return this.completo(pizzariaId, pedidoId);
   }
 
-  // Entregador só enxerga o que foi atribuído a ele. Para os outros o pedido "não existe": responde 404
-  private podeVer(auth: AuthContext, entregadorId: string | null): boolean {
-    return auth.papel !== "entregador" || entregadorId === auth.membroId;
-  }
-
-  private async completo(pizzariaId: string, pedidoId: string): Promise<PedidoCompleto> {
+  async completo(pizzariaId: string, pedidoId: string): Promise<PedidoCompleto> {
     const pedido = await pedidoRepository.findById(pizzariaId, pedidoId);
     if (!pedido) throw PEDIDO_NAO_ENCONTRADO();
     return this.montarCompleto(pizzariaId, pedido);
   }
 
   private async montarCompleto(pizzariaId: string, pedido: Pedido): Promise<PedidoCompleto> {
-    const [[comItens], eventos] = await Promise.all([
+    const [[comItens], eventos, pagamentos] = await Promise.all([
       pedidoRepository.comItens(pizzariaId, [pedido]),
       pedidoRepository.listarEventos(pizzariaId, pedido.id),
+      pagamentoRepository.listar(pizzariaId, { pedidoId: pedido.id }),
     ]);
-    return { ...comItens, eventos };
+    return { ...comItens, eventos, pagamentos };
   }
 
   // Cliente, cópia do endereço e taxa. Sem área ligada ao endereço, vale a taxa padrão da loja
-  private async resolverEntrega(
-    pizzaria: Pizzaria,
-    dados: CriarPedidoEntrada
-  ): Promise<{ endereco: EnderecoEntrega | null; areaEntregaId: string | null; taxa: string }> {
+  private async resolverEntrega(pizzaria: Pizzaria, dados: CriarPedidoEntrada): Promise<EntregaResolvida> {
     if (dados.clienteId && !(await clienteRepository.findById(pizzaria.id, dados.clienteId))) {
       throw new AppError("Cliente não encontrado", 400, "CLIENTE_INVALIDO");
     }

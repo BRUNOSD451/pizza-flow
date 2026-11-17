@@ -3,8 +3,8 @@ import { z } from "zod";
 import { telefoneSchema } from "../schemas/pizzaria_schema";
 import { clienteService } from "../services/cliente_service";
 
-const nomeSchema = z.string("Informe o nome").trim().min(2, "Nome muito curto").max(150, "Nome muito longo");
-const emailSchema = z.email("Informe um email válido").max(255, "Email muito longo").nullable();
+export const nomeSchema = z.string("Informe o nome").trim().min(2, "Nome muito curto").max(150, "Nome muito longo");
+export const emailSchema = z.email("Informe um email válido").max(255, "Email muito longo").nullable();
 const observacoesSchema = z.string("observacoes deve ser texto").trim().max(1000, "Observações muito longas").nullable();
 
 const listarSchema = z.object({
@@ -35,22 +35,22 @@ function textoEndereco(campo: string, maximo: number) {
 
 const areaEntregaIdSchema = z.uuid("area_entrega_id inválido").nullable();
 // Salvo só com dígitos
-const cepSchema = z
+export const cepSchema = z
   .string("cep deve ser texto")
   .transform((cep) => cep.replace(/\D/g, ""))
   .refine((cep) => cep.length === 8, "CEP deve ter 8 dígitos")
   .nullable();
-const logradouroSchema = textoEndereco("logradouro", 200);
-const numeroSchema = textoEndereco("numero", 20);
-const complementoSchema = z.string("complemento deve ser texto").trim().max(100, "complemento muito longo").nullable();
-const bairroSchema = textoEndereco("bairro", 100);
-const cidadeSchema = textoEndereco("cidade", 100);
-const estadoSchema = z
+export const logradouroSchema = textoEndereco("logradouro", 200);
+export const numeroSchema = textoEndereco("numero", 20);
+export const complementoSchema = z.string("complemento deve ser texto").trim().max(100, "complemento muito longo").nullable();
+export const bairroSchema = textoEndereco("bairro", 100);
+export const cidadeSchema = textoEndereco("cidade", 100);
+export const estadoSchema = z
   .string("Informe o estado")
   .trim()
   .toUpperCase()
   .regex(/^[A-Z]{2}$/, "Use a sigla do estado (ex.: SP)");
-const referenciaSchema = z.string("referencia deve ser texto").trim().max(200, "referencia muito longa").nullable();
+export const referenciaSchema = z.string("referencia deve ser texto").trim().max(200, "referencia muito longa").nullable();
 const principalSchema = z.boolean("principal deve ser true ou false");
 
 const criarEnderecoSchema = z

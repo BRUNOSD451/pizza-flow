@@ -37,6 +37,13 @@ class memberservice {
     return memberRepository.listByPizzaria(pizzariaId);
   }
 
+  // Para o atendente escolher quem leva o pedido: só entregadores ativos, sem email
+  async listarEntregadores(pizzariaId: string): Promise<{ id: string; nome: string }[]> {
+    return (await memberRepository.listByPizzaria(pizzariaId))
+      .filter((m) => m.ativo && m.papel === "entregador")
+      .map((m) => ({ id: m.id, nome: m.nome }));
+  }
+
   // Cria o usuário com senha aleatória e já o liga à pizzaria; no primeiro login ele é obrigado a trocar
   async criar(pizzariaId: string, dados: CriarMembroEquipeDados): Promise<MembroComSenhaTemporaria> {
     if (await userRepository.findByEmail(dados.email)) throw EMAIL_EM_USO();
